@@ -183,6 +183,10 @@ dialog input,dialog select{width:100%;padding:10px 12px;border:1px solid var(--l
     <div><label for="f_g">Γραμμή P&amp;L</label><select id="f_g"></select></div>
   </div>
   <label for="f_s">Προμηθευτής</label><select id="f_s"></select>
+  <div class="two">
+    <div><label for="f_w">⚖ Ζύγισμα: κιλά γεμάτου (προαιρ.)</label><input id="f_w" inputmode="decimal" autocomplete="off" placeholder="π.χ. 20"></div>
+    <div><label for="f_t">Απόβαρο άδειου (kg)</label><input id="f_t" inputmode="decimal" autocomplete="off" placeholder="π.χ. 0,5"></div>
+  </div>
   <div class="actions">
     <button class="btn" value="save" id="dlgSave">Αποθήκευση</button>
     <button class="btn ghost" value="cancel" formnovalidate>Άκυρο</button>
@@ -753,12 +757,16 @@ function openSheet(id,seq){
   const sh=$("#sheet");sh.classList.add("on");sh.setAttribute("aria-hidden","false");
   $("#shNext").focus({preventScroll:true});
 }
+const isW=it=>S.mode==="count"&&it&&it.w>0;
+const kgToQ=(it,kg)=>Math.max(0,Math.round((kg-(it.t||0))/it.w*1000)/1000);
+const qToKg=(it,q)=>Math.round((q*it.w+(it.t||0))*1000)/1000;
 function loadItem(){
   const id=S.seq[S.cur],it=S.byId.get(id);if(!it){closeSheet();return}
   const q=getQ(id);
-  S.exp=q!=null?num(q):"";S.fresh=true;
+  S.exp=q!=null?num(isW(it)?qToKg(it,q):q):"";S.fresh=true;
   $("#shName").textContent=it.n;
   if(S.mode==="order"){const st=lastStock(it);$("#shMeta").textContent=`${eur(PX(it)).replace(" €","")} €/${it.u}${st?` · απόθεμα ${num(st.q)} ${it.u} (${dstr(st.d)})`:""} · ${S.cur+1} από ${S.seq.length}`}
+  else if(isW(it))$("#shMeta").textContent=`⚖ Ζύγισε και γράψε κιλά (γεμάτο ${num(it.w)} kg${it.t?`, απόβαρο ${num(it.t)} kg`:""}) · ${S.cur+1} από ${S.seq.length}`;
   else $("#shMeta").textContent=`${it.a} · ${it.c} · ${eur(PX(it)).replace(" €","")} €/${it.u} · ${S.cur+1} από ${S.seq.length}`;
   $("#shZero").hidden=S.mode==="order";
   $("#shClear").textContent=S.mode==="order"?"Αφαίρεση από παραγγελία":"Αφαίρεση μέτρησης";
@@ -772,6 +780,7 @@ function drawExp(){
   e.textContent=S.exp||"0";e.classList.toggle("fresh",S.fresh);
   const v=evalExp(S.exp);
   const op=/[+×]/.test(S.exp);
+  if(isW(it)){const q=v==null||Number.isNaN(v)?null:kgToQ(it,v);$("#shRes").innerHTML=q==null?"kg":`<b>${op?"= "+num(v)+" ":""}kg → ${num(q)} ${esc(it.u)}</b>${eur(q*PX(it))}`;return}
   $("#shRes").innerHTML=v==null||Number.isNaN(v)?`${esc(it.u)}`:`${op?`<b>= ${num(v)} ${esc(it.u)}</b>`:`<b>${esc(it.u)}</b>`}${eur(v*PX(it))}`;
 }
 function key(k){
@@ -788,8 +797,9 @@ $("#pad").addEventListener("click",e=>{const b=e.target.closest("button");if(b)k
 function commit(){
   const id=S.seq[S.cur];
   if(S.fresh)return true;
-  const v=evalExp(S.exp);
+  let v=evalExp(S.exp);
   if(Number.isNaN(v)){toast("Η ποσότητα δεν είναι σωστή.");return false}
+  const itw=S.byId.get(id);if(isW(itw)&&v!=null)v=kgToQ(itw,v);
   if(S.mode==="order"&&v===0){if(getQ(id)!=null)putQ(id,null);return true}
   if(v!==(getQ(id)??null))putQ(id,v);
   return true;
@@ -913,7 +923,7 @@ function openItem(id){
   $("#f_a").innerHTML=AREAS.map(a=>`<option${a===it.a?" selected":""}>${a}</option>`).join("");
   $("#f_g").innerHTML=GROUPS.map(g=>`<option${g===it.g?" selected":""}>${g}</option>`).join("");
   $("#f_s").innerHTML=`<option value="">—</option>`+S.suppliers.map(s=>`<option value="${s.id}"${s.id===it.s?" selected":""}>${esc(s.n)}</option>`).join("");
-  $("#f_n").value=it.n;$("#f_c").value=it.c;$("#f_u").value=it.u;$("#f_p").value=id?num(it.p):"";
+  $("#f_n").value=it.n;$("#f_c").value=it.c;$("#f_u").value=it.u;$("#f_p").value=id?num(it.p):"";$("#f_w").value=it.w?num(it.w):"";$("#f_t").value=it.t?num(it.t):"";
   $("#dlgDel").hidden=!id;
   $("#itemDlg").returnValue="";$("#itemDlg").showModal();
 }
@@ -923,6 +933,7 @@ $("#itemDlg").addEventListener("close",async()=>{
     const p=parse($("#f_p").value);
     if(p==null||Number.isNaN(p)){toast("Η τιμή δεν είναι σωστή.");return}
     const rec={n:$("#f_n").value.trim(),c:$("#f_c").value.trim(),a:$("#f_a").value,u:$("#f_u").value,p,g:$("#f_g").value,s:$("#f_s").value};
+    const w=parse($("#f_w").value),t=parse($("#f_t").value);rec.w=w>0?w:0;rec.t=t>0?t:0;
     if(!rec.n||!rec.c){toast("Συμπλήρωσε όνομα και κατηγορία.");return}
     const items=S.catalog.map(x=>({...x}));
     if(id){const k=items.findIndex(x=>x.id===id);items[k]={...items[k],...rec}}
